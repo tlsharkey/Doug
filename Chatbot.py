@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from openai import OpenAI
 import azure.cognitiveservices.speech as speechsdk
 import regex as re
@@ -61,7 +63,7 @@ class Chatbot:
                 print("Did you set the speech resource key and region values?")
             return None
         
-    def speak(self, text_to_speak):
+    def speak(self, text_to_speak: str):
         '''
         Converts text into audio and plays that audio.
         Audio is played synchronously.
@@ -73,7 +75,7 @@ class Chatbot:
         result = speech_synthesizer.speak_text_async(text_to_speak).get()
         return
     
-    def speak_ssml(self, ssml_text):
+    def speak_ssml(self, ssml_text: str):
         '''
         Converts text into audio and plays that audio.
         Audio is played synchronously.
@@ -91,16 +93,11 @@ class Chatbot:
         result = speech_synthesizer.speak_ssml_async(ssml_text).get()
         return
     
-    def listen_for_wake_word(self, wake_word="Hey Chatbot", wake_word_detector_file="somefile.table"):
+    def listen_for_wake_word(self, wake_word_detector_file="somefile.table"):
         '''
         Listens from the microphone until the wake word is detected.
         '''
         model = speechsdk.KeywordRecognitionModel(wake_word_detector_file)
-
-        # The phrase your keyword recognition model triggers on.
-        keyword = wake_word
-
-        # Create a local keyword recognizer with the default microphone device for input.
         keyword_recognizer = speechsdk.KeywordRecognizer()
 
         done = False
@@ -129,36 +126,29 @@ class Chatbot:
 
         # Start keyword recognition.
         result_future = keyword_recognizer.recognize_once_async(model)
-        print('Say something starting with "{}" followed by whatever you want...'.format(keyword))
-        result = result_future.get()
+        print('Say something starting with key word followed by whatever you want...')
+        result_future.get()
+        print('Keyword recognition finished.')
         return
 
-        # Read result audio (incl. the keyword).
-        if result.reason == speechsdk.ResultReason.RecognizedKeyword:
-            time.sleep(2) # give some time so the stream is filled
-            result_stream = speechsdk.AudioDataStream(result)
-            result_stream.detach_input() # stop any more data from input getting to the stream
 
-            save_future = result_stream.save_to_wav_file_async("AudioFromRecognizedKeyword.wav")
-            print('Saving file...')
-            saved = save_future.get()
-
-        # If active keyword recognition needs to be stopped before results, it can be done with
-        #
-        #   stop_future = keyword_recognizer.stop_recognition_async()
-        #   print('Stopping...')
-        #   stopped = stop_future.get()
-
-
-    def audio_chat(self, wake_word=None, ssml=False):
+    def audio_chat(self, wake_word_detector_file=None, ssml=False):
+        print("Listening for speech.")
         message_text = self.listen_for_sentence()
-        if (message_text is None and wake_word is not None):
+        if (message_text is None and wake_word_detector_file is not None):
             print("Sleeping chatbot.")
-            self.listen_for_wake_word(wake_word=wake_word)
+            res = self.listen_for_wake_word(wake_word_detector_file=wake_word_detector_file)
+            print(res)
             print("Wake word detected.")
-            message_text = self.listen_for_sentence()
+            self.audio_chat(wake_word_detector_file=wake_word_detector_file, ssml=ssml)
+            return
         elif message_text is None:
             print("No speech detected.")
+            return
+
+        if (re.match(r"bye|goodbye|exit|quit|stop|shutup|go away", message_text)):
+            print("Chatbot stopped.")
+            self.speak("Goodbye!")
             return
         
         response = self.get_response(message_text)
@@ -169,34 +159,10 @@ class Chatbot:
             self.speak(response)
         print("Doug spoke.")
 
-        self.audio_chat(wake_word=wake_word, ssml=ssml)
+        self.audio_chat(wake_word_detector_file=wake_word_detector_file, ssml=ssml)
 
-
-        
-    
     def reset(self):
+        system_prompt = self.__history[0]["content"]
         self.__history = [
-            {"role": "system", "content": "You Doug from the UP movie. Behave as Doug."}
+            {"role": "system", "content": system_prompt}
         ]
-
-
-
-
-if __name__ == "__main__":
-    doug = Chatbot("""
-                   You Doug from the UP movie. Behave as Doug.
-                   You should use speech markers to be more expressive.
-                   e.g. : I am a dog <break time="200ms"/> I am a talking dog.
-                   Note that there's a break after punctuation. This is only needed for added pauses.
-                   e.g. : <mstts:express-as style="sad" styledegree="2">I am a sad dog.</mstts:express-as> 
-                   where styledegree is between 0.01 and 2 with a default of 1.
-                   style="affectionate", "angry", "calm", "chat", "cheerful", "depressed", "disgruntled", "embarrassed", "empathetic", "envious", "excited", "fearful", "friendly", "gentle", "hopeful", "lyrical","sad", "serious", "shouting", "whispering", "terrified", "unfriendly"
-                   <prosody rate="+10.00%" pitch="+10.00%">Hi there</prosody>
-                   this will increase the speed and pitch of the voice. Since you're an energetic dog, you might want to use this.
-                   """,
-                   voice = "en-US-AndrewMultilingualNeural")
-    # doug.text_chat()
-    doug.audio_chat(
-        # wake_word="Hey Doug", 
-        ssml=True
-        )
