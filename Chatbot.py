@@ -4,8 +4,7 @@ from openai import OpenAI
 import azure.cognitiveservices.speech as speechsdk
 import regex as re
 import os
-import time
-import importlib.resources
+
 
 class Chatbot:
     kill = False
@@ -27,20 +26,20 @@ class Chatbot:
     @property
     def history(self):
         return self.__history
-    
+
     @property
     def status(self):
         return self.__status
-    
+
     @status.setter
     def status(self, value):
         self.__status = value
         if "status" in self.__listeners:
             for listener in self.__listeners["status"]:
                 listener(value)
-    
+
     def add_listener(self, event, callback):
-        if not event in self.__listeners:
+        if event not in self.__listeners:
             self.__listeners[event] = []
         self.__listeners[event].append(callback)
 
@@ -56,14 +55,14 @@ class Chatbot:
             for listener in self.__listeners["gpt-response"]:
                 listener(completion.choices[0].message)
         return completion.choices[0].message.content
-    
+
     def text_chat(self):
         message = ""
         while re.search(r"bye|goodbye|exit|quit|stop|shutup", message) is None:
             message = input("You: ")
             response = self.get_response(message)
             print("Doug:", response)
-    
+
     def listen_for_sentence(self):
         '''
         Listens from the microphone until there is a pause in speech.
@@ -71,7 +70,7 @@ class Chatbot:
         '''
         self.status = "listening to speech"
         speech_config = speechsdk.SpeechConfig(subscription=self.__speech_key, region=self.__speech_region)
-        speech_config.speech_recognition_language="en-US"
+        speech_config.speech_recognition_language = "en-US"
 
         audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
         speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
@@ -96,7 +95,7 @@ class Chatbot:
                 print("Error details: {}".format(cancellation_details.error_details))
                 print("Did you set the speech resource key and region values?")
             return None
-        
+
     def speak(self, text_to_speak: str):
         '''
         Converts text into audio and plays that audio.
@@ -107,9 +106,9 @@ class Chatbot:
         speech_config.speech_synthesis_voice_name = self.__voice
         speech_config.speech_synthesis_language = "en-US"
         speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
-        result = speech_synthesizer.speak_text_async(text_to_speak).get()
+        speech_synthesizer.speak_text_async(text_to_speak).get()
         return
-    
+
     def speak_ssml(self, ssml_text: str):
         '''
         Converts text into audio and plays that audio.
@@ -128,15 +127,13 @@ class Chatbot:
                     "</speak>"
         result = speech_synthesizer.speak_ssml_async(ssml_text).get()
         return
-    
+
     def listen_for_wake_word(self, wake_word_detector_file="somefile.table"):
         '''
         Listens from the microphone until the wake word is detected.
         '''
         self.status = "listening for wake word"
         print("[Chatbot] Getting wake word from file:", wake_word_detector_file)
-        wake_word_detector_file = importlib.resources.path("doug.resources", "final_lowfa.table")
-        print("Wake word detector file:", wake_word_detector_file)
         model = speechsdk.KeywordRecognitionModel(str(wake_word_detector_file))
         keyword_recognizer = speechsdk.KeywordRecognizer()
 
@@ -172,11 +169,10 @@ class Chatbot:
         print('Keyword recognition finished.')
         return
 
-
     def audio_chat(self, wake_word_detector_file=None, ssml=False):
         if self.kill:
             return
-        
+
         print("Listening for speech.")
         message_text = self.listen_for_sentence()
         if (message_text is None and wake_word_detector_file is not None):
@@ -194,7 +190,7 @@ class Chatbot:
             print("Chatbot stopped.")
             self.speak("Goodbye!")
             return
-        
+
         response = self.get_response(message_text)
         print("Doug:", response)
         if ssml:
@@ -218,7 +214,7 @@ if __name__ == "__main__":
                    You should use speech markers to be more expressive.
                    e.g. : I am a dog <break time="200ms"/> I am a talking dog.
                    Note that there's a break after punctuation. This is only needed for added pauses.
-                   e.g. : <mstts:express-as style="sad" styledegree="2">I am a sad dog.</mstts:express-as> 
+                   e.g. : <mstts:express-as style="sad" styledegree="2">I am a sad dog.</mstts:express-as>
                    where styledegree is between 0.01 and 2 with a default of 1.
                    style="affectionate", "angry", "calm", "chat", "cheerful", "depressed", "disgruntled", "embarrassed", "empathetic", "envious", "excited", "fearful", "friendly", "gentle", "hopeful", "lyrical","sad", "serious", "shouting", "whispering", "terrified", "unfriendly"
                    <prosody rate="+10.00%" pitch="+10.00%">Hi there</prosody>
@@ -239,3 +235,4 @@ if __name__ == "__main__":
             doug.speak_ssml("<prosody rate=\"+10.00%\" pitch=\"+10.00%\">I think I lost my last brain cell. Let me reset.</prosody>")
             doug.reset()
             continue
+
