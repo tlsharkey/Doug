@@ -5,8 +5,11 @@ import azure.cognitiveservices.speech as speechsdk
 import regex as re
 import os
 import time
+import importlib.resources
 
 class Chatbot:
+    kill = False
+
     def __init__(self, system_prompt="You are a helpful assistant.", voice="en-US-AvaMultilingualNeural"):
         self.__openai_api_key = os.environ["OPENAI_API_KEY"]
         self.__openai_model = "gpt-4o-mini"
@@ -18,14 +21,40 @@ class Chatbot:
             {"role": "system", "content": system_prompt}
         ]
         self.__openai_client = OpenAI(api_key=self.__openai_api_key)
+        self.__listeners = {}
+        self.status = "initialized"
+
+    @property
+    def history(self):
+        return self.__history
+    
+    @property
+    def status(self):
+        return self.__status
+    
+    @status.setter
+    def status(self, value):
+        self.__status = value
+        if "status" in self.__listeners:
+            for listener in self.__listeners["status"]:
+                listener(value)
+    
+    def add_listener(self, event, callback):
+        if not event in self.__listeners:
+            self.__listeners[event] = []
+        self.__listeners[event].append(callback)
 
     def get_response(self, message):
+        self.status = "getting gpt response"
         self.__history.append({"role": "user", "content": message})
         completion = self.__openai_client.chat.completions.create(
             model=self.__openai_model,
             messages=self.__history
         )
         self.__history.append(completion.choices[0].message)
+        if "gpt-response" in self.__listeners:
+            for listener in self.__listeners["gpt-response"]:
+                listener(completion.choices[0].message)
         return completion.choices[0].message.content
     
     def text_chat(self):
@@ -40,6 +69,7 @@ class Chatbot:
         Listens from the microphone until there is a pause in speech.
         If no speech is detected, returns None.
         '''
+        self.status = "listening to speech"
         speech_config = speechsdk.SpeechConfig(subscription=self.__speech_key, region=self.__speech_region)
         speech_config.speech_recognition_language="en-US"
 
@@ -51,7 +81,11 @@ class Chatbot:
 
         if speech_recognition_result.reason == speechsdk.ResultReason.RecognizedSpeech:
             # print("Recognized: {}".format(speech_recognition_result.text))
-            return speech_recognition_result.text
+            text = speech_recognition_result.text
+            if "transcription" in self.__listeners:
+                for listener in self.__listeners["transcription"]:
+                    listener(text)
+            return text
         elif speech_recognition_result.reason == speechsdk.ResultReason.NoMatch:
             print("No speech could be recognized: {}".format(speech_recognition_result.no_match_details))
             return None
@@ -68,6 +102,7 @@ class Chatbot:
         Converts text into audio and plays that audio.
         Audio is played synchronously.
         '''
+        self.status = "speaking"
         speech_config = speechsdk.SpeechConfig(subscription=self.__speech_key, region=self.__speech_region)
         speech_config.speech_synthesis_voice_name = self.__voice
         speech_config.speech_synthesis_language = "en-US"
@@ -80,6 +115,7 @@ class Chatbot:
         Converts text into audio and plays that audio.
         Audio is played synchronously.
         '''
+        self.status = "speaking"
         speech_config = speechsdk.SpeechConfig(subscription=self.__speech_key, region=self.__speech_region)
         speech_config.speech_synthesis_voice_name = self.__voice
         speech_config.speech_synthesis_language = "en-US"
@@ -97,7 +133,11 @@ class Chatbot:
         '''
         Listens from the microphone until the wake word is detected.
         '''
-        model = speechsdk.KeywordRecognitionModel(wake_word_detector_file)
+        self.status = "listening for wake word"
+        print("[Chatbot] Getting wake word from file:", wake_word_detector_file)
+        wake_word_detector_file = importlib.resources.path("doug.resources", "final_lowfa.table")
+        print("Wake word detector file:", wake_word_detector_file)
+        model = speechsdk.KeywordRecognitionModel(str(wake_word_detector_file))
         keyword_recognizer = speechsdk.KeywordRecognizer()
 
         done = False
@@ -110,6 +150,7 @@ class Chatbot:
             result = evt.result
             if result.reason == speechsdk.ResultReason.RecognizedKeyword:
                 print("RECOGNIZED KEYWORD: {}".format(result.text))
+                self.status = "wake word detected"
             nonlocal done
             done = True
 
@@ -133,6 +174,9 @@ class Chatbot:
 
 
     def audio_chat(self, wake_word_detector_file=None, ssml=False):
+        if self.kill:
+            return
+        
         print("Listening for speech.")
         message_text = self.listen_for_sentence()
         if (message_text is None and wake_word_detector_file is not None):
@@ -166,3 +210,32 @@ class Chatbot:
         self.__history = [
             {"role": "system", "content": system_prompt}
         ]
+
+
+if __name__ == "__main__":
+    doug = Chatbot("""
+                   You Doug from the UP movie. Behave as Doug.
+                   You should use speech markers to be more expressive.
+                   e.g. : I am a dog <break time="200ms"/> I am a talking dog.
+                   Note that there's a break after punctuation. This is only needed for added pauses.
+                   e.g. : <mstts:express-as style="sad" styledegree="2">I am a sad dog.</mstts:express-as> 
+                   where styledegree is between 0.01 and 2 with a default of 1.
+                   style="affectionate", "angry", "calm", "chat", "cheerful", "depressed", "disgruntled", "embarrassed", "empathetic", "envious", "excited", "fearful", "friendly", "gentle", "hopeful", "lyrical","sad", "serious", "shouting", "whispering", "terrified", "unfriendly"
+                   <prosody rate="+10.00%" pitch="+10.00%">Hi there</prosody>
+                   this will increase the speed and pitch of the voice. Since you're an energetic dog, you might want to use this.
+                   """,
+                   voice = "en-US-AndrewMultilingualNeural")
+    doug.add_listener("status", lambda status: print("UPDATED Status:", status))
+    # doug.text_chat()
+    while True:
+        try:
+            doug.speak_ssml("<prosody rate=\"+10.00%\" pitch=\"+10.00%\">Squirrel!</prosody>")
+            doug.audio_chat(
+                wake_word_detector_file="./final_lowfa.table",
+                ssml=True
+                )
+        except Exception as e:
+            print("\nERROR:", e)
+            doug.speak_ssml("<prosody rate=\"+10.00%\" pitch=\"+10.00%\">I think I lost my last brain cell. Let me reset.</prosody>")
+            doug.reset()
+            continue
